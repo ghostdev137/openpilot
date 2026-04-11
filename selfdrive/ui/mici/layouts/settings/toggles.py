@@ -13,6 +13,9 @@ class TogglesLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
 
+    # ghostpilot: steering mode selector
+    self._steering_mode_toggle = BigMultiParamToggle("steering mode", "GhostpilotSteeringMode", ["lane centering", "apa", "lane keep"])
+
     self._personality_toggle = BigMultiParamToggle("driving personality", "LongitudinalPersonality", ["aggressive", "standard", "relaxed"])
     self._experimental_btn = BigParamControl("experimental mode", "ExperimentalMode")
     is_metric_toggle = BigParamControl("use metric units", "IsMetric")
@@ -23,6 +26,7 @@ class TogglesLayoutMici(NavScroller):
     enable_openpilot = BigParamControl("enable openpilot", "OpenpilotEnabledToggle", toggle_callback=restart_needed_callback)
 
     self._scroller.add_widgets([
+      self._steering_mode_toggle,
       self._personality_toggle,
       self._experimental_btn,
       is_metric_toggle,
@@ -81,6 +85,9 @@ class TogglesLayoutMici(NavScroller):
         self._experimental_btn.set_checked(False)
         self._personality_toggle.set_visible(False)
         ui_state.params.remove("ExperimentalMode")
+
+    # ghostpilot: steering mode only changeable when car is off
+    self._steering_mode_toggle.set_enabled(not ui_state.started)
 
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
