@@ -8,7 +8,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from .bridge_client import BridgeClient
+try:
+  from .bridge_client import BridgeClient
+except ImportError:
+  from bridge_client import BridgeClient
 
 # ---------------------------------------------------------------------------
 # Config
