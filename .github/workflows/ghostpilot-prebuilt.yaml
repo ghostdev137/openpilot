@@ -58,6 +58,10 @@ jobs:
             find . -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
             find . -name ".sconsign.dblite" -delete
 
+            # Remove .venv — device must run uv sync after cloning
+            # Docker venv has broken symlinks pointing to /root/.local/...
+            rm -rf .venv
+
             touch prebuilt
           '
 
