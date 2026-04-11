@@ -38,7 +38,7 @@ Three lateral control modes, selectable via a single constant:
 | Mode | Channel | How it works |
 |------|---------|-------------|
 | **STOCK** (default) | TJA/LCA curvature | Standard openpilot lane centering via `LateralMotionControl` |
-| **APA** | ParkAid_Data (0x3A8) | SAPP handshake with PSCM for direct steering angle control |
+| **APA** | ParkAid_Data (0x3A8) | SAPP handshake with PSCM for direct steering angle control. **No speed spoofing — will not work over ~5 MPH.** |
 | **LKA** | Lane_Assist_Data1 (0x3CA) | Incremental angle corrections through the LKA channel |
 
 #### Switching Modes
