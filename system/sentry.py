@@ -18,23 +18,13 @@ class SentryProject(Enum):
 
 
 def report_tombstone(fn: str, message: str, contents: str) -> None:
+  # ghostpilot: log locally only, no Sentry upload
   cloudlog.error({'tombstone': message})
-
-  with sentry_sdk.configure_scope() as scope:
-    scope.set_extra("tombstone_fn", fn)
-    scope.set_extra("tombstone", contents)
-    sentry_sdk.capture_message(message=message)
-    sentry_sdk.flush()
 
 
 def capture_exception(*args, **kwargs) -> None:
+  # ghostpilot: log locally only, no Sentry upload
   cloudlog.error("crash", exc_info=kwargs.get('exc_info', 1))
-
-  try:
-    sentry_sdk.capture_exception(*args, **kwargs)
-    sentry_sdk.flush()  # https://github.com/getsentry/sentry-python/issues/291
-  except Exception:
-    cloudlog.exception("sentry exception")
 
 
 def set_tag(key: str, value: str) -> None:
@@ -42,6 +32,9 @@ def set_tag(key: str, value: str) -> None:
 
 
 def init(project: SentryProject) -> bool:
+  # ghostpilot: telemetry disabled
+  return False
+
   build_metadata = get_build_metadata()
   # forks like to mess with this, so double check
   comma_remote = build_metadata.openpilot.comma_remote and "commaai" in build_metadata.openpilot.git_origin

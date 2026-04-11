@@ -63,12 +63,13 @@ def manager_init() -> None:
   params.put_bool("IsReleaseBranch", build_metadata.release_channel)
   params.put("HardwareSerial", serial)
 
-  # set dongle id
+  # ghostpilot: registration with comma.ai is optional
   reg_res = register(show_spinner=True)
   if reg_res:
     dongle_id = reg_res
   else:
-    raise Exception(f"Registration failed for device {serial}")
+    dongle_id = UNREGISTERED_DONGLE_ID
+    params.put("DongleId", dongle_id)
   os.environ['DONGLE_ID'] = dongle_id  # Needed for swaglog
   os.environ['GIT_ORIGIN'] = build_metadata.openpilot.git_normalized_origin # Needed for swaglog
   os.environ['GIT_BRANCH'] = build_metadata.channel # Needed for swaglog

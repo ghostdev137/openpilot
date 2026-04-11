@@ -65,12 +65,14 @@ def and_(*fns):
   return lambda *args: operator.and_(*(fn(*args) for fn in fns))
 
 procs = [
-  DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
+  # ghostpilot: athenad disabled — no comma.ai websocket telemetry
+  DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid", enabled=False),
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
-  PythonProcess("logmessaged", "system.logmessaged", always_run),
+  # ghostpilot: log forwarding disabled
+  PythonProcess("logmessaged", "system.logmessaged", always_run, enabled=False),
 
   NativeProcess("camerad", "system/camerad", ["./camerad"], driverview, enabled=not WEBCAM),
   PythonProcess("webcamerad", "tools.webcam.camerad", driverview, enabled=WEBCAM),
@@ -106,11 +108,15 @@ procs = [
   PythonProcess("lateral_maneuversd", "tools.lateral_maneuvers.lateral_maneuversd", lat_maneuver),
   PythonProcess("radard", "selfdrive.controls.radard", only_onroad),
   PythonProcess("hardwared", "system.hardware.hardwared", always_run),
-  PythonProcess("tombstoned", "system.tombstoned", always_run, enabled=not PC),
+  # ghostpilot: tombstoned sends crashes to Sentry — disabled
+  PythonProcess("tombstoned", "system.tombstoned", always_run, enabled=False),
   PythonProcess("updated", "system.updated.updated", only_offroad, enabled=not PC),
-  PythonProcess("uploader", "system.loggerd.uploader", always_run),
-  PythonProcess("statsd", "system.statsd", always_run),
-  PythonProcess("feedbackd", "selfdrive.ui.feedback.feedbackd", only_onroad),
+  # ghostpilot: uploader sends logs/video to comma.ai — disabled
+  PythonProcess("uploader", "system.loggerd.uploader", always_run, enabled=False),
+  # ghostpilot: statsd sends metrics to comma.ai — disabled
+  PythonProcess("statsd", "system.statsd", always_run, enabled=False),
+  # ghostpilot: feedbackd sends UI feedback to comma.ai — disabled
+  PythonProcess("feedbackd", "selfdrive.ui.feedback.feedbackd", only_onroad, enabled=False),
 
   # debug procs
   NativeProcess("bridge", "cereal/messaging", ["./bridge"], notcar),
