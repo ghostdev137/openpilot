@@ -149,7 +149,9 @@ class TogglesLayout(Widget):
       # insert longitudinal personality after NDOG toggle
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
-        self._toggles["GhostpilotSteeringMode"] = self._steering_mode_setting
+
+    # ghostpilot: always show steering mode toggle regardless of car state
+    self._toggles["GhostpilotSteeringMode"] = self._steering_mode_setting
 
     self._update_experimental_mode_icon()
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
