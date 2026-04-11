@@ -1,5 +1,8 @@
 name: ghostpilot prebuilt
 on:
+  push:
+    branches:
+      - ghostpilot
   workflow_dispatch:
 
 jobs:
