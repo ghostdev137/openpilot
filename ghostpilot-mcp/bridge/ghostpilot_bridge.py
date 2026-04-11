@@ -237,8 +237,9 @@ async def rpc_cereal_read_multi(params):
 async def rpc_param_get(params):
   key = params["key"]
   p = _get_params()()
-  val = p.get(key)
-  if val is not None:
+  val = p.get(key, return_default=True)
+  # val is already typed (int, bool, str, etc.) from params_pyx
+  if isinstance(val, bytes):
     try:
       val = val.decode("utf-8")
     except Exception:
@@ -328,7 +329,11 @@ async def rpc_openpilot_state(_params):
   state = {}
 
   # Params
-  state["fingerprint"] = (p.get("CarName") or b"").decode("utf-8", errors="replace")
+  try:
+    fp = p.get("CarFingerprint")
+    state["fingerprint"] = fp.decode("utf-8", errors="replace") if isinstance(fp, bytes) else str(fp or "unknown")
+  except Exception:
+    state["fingerprint"] = "unknown"
   state["dongleId"] = (p.get("DongleId") or b"").decode("utf-8", errors="replace")
   state["gitBranch"] = (p.get("GitBranch") or b"").decode("utf-8", errors="replace")
 
