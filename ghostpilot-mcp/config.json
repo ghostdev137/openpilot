@@ -1,6 +1,0 @@
-{
-  "bridge_host": "192.168.4.171",
-  "bridge_port": 8765,
-  "log_dir": "~/.ghostpilot/logs",
-  "dbc": "ford_lincoln_base_pt"
-}
