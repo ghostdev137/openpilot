@@ -1,5 +1,9 @@
 # ghostpilot
 
+> **WARNING: OFF-ROAD AND RESEARCH USE ONLY.** This software is experimental and has all safety checks disabled. It is **not intended for use on public roads**. Use at your own risk. The authors assume no liability for any damage, injury, or legal consequences resulting from the use of this software.
+
+> **University Research Project.** This fork is being developed as part of university research into vehicle CAN bus communication and autonomous steering control systems. It is an academic research platform, not a consumer product.
+
 A Ford-focused openpilot fork with full CAN passthrough, no telemetry, and experimental steering modes for development and research.
 
 Based on [commaai/openpilot](https://github.com/commaai/openpilot). Not affiliated with comma.ai.
