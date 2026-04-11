@@ -1,0 +1,82 @@
+name: ghostpilot prebuilt
+on:
+  push:
+    branches:
+      - ghostpilot
+  workflow_dispatch:
+
+jobs:
+  build_prebuilt:
+    name: build ghostpilot prebuilt
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ghostpilot
+        submodules: true
+        fetch-depth: 0
+
+    - run: git lfs pull
+
+    - name: Set up QEMU for aarch64
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+
+    - name: Build prebuilt in aarch64 container
+      run: |
+        docker run --rm --platform linux/arm64 \
+          -v ${{ github.workspace }}:/openpilot \
+          -w /openpilot \
+          ubuntu:24.04 bash -c '
+            set -e
+
+            # Install build deps
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential git curl python3 python3-venv \
+              libffi-dev libssl-dev pkg-config \
+              gcc-arm-none-eabi ca-certificates
+
+            # Install uv
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="/root/.local/bin:$PATH"
+
+            # Install python deps
+            uv sync --frozen --all-extras
+
+            # Build openpilot
+            source .venv/bin/activate
+            scons -j$(nproc) --minimal
+
+            # Build panda firmware
+            cd panda && scons -j$(nproc) && cd ..
+
+            # Clean up build artifacts we dont need
+            find . -name "*.o" -delete
+            find . -name "*.os" -delete
+            find . -name "*.a" -delete
+            find . -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            find . -name ".sconsign.dblite" -delete
+
+            # Mark as prebuilt
+            touch prebuilt
+          '
+
+    - name: Push prebuilt branch
+      run: |
+        git config user.name "ghostdev"
+        git config user.email "ghostdev137@users.noreply.github.com"
+
+        # Create orphan prebuilt branch
+        git checkout --orphan ghostpilot-prebuilt
+
+        # Add all files including built artifacts
+        git add -f .
+        VERSION=$(cat common/version.h 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || echo "dev")
+        git commit -m "ghostpilot prebuilt v${VERSION} $(date -u +%Y-%m-%d)"
+
+        # Force push
+        git push -f origin ghostpilot-prebuilt
