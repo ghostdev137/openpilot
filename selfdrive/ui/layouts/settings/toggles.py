@@ -119,6 +119,10 @@ class TogglesLayout(Widget):
 
     self._toggles = {}
     self._locked_toggles = set()
+
+    # ghostpilot: steering mode first in the list
+    self._toggles["GhostpilotSteeringMode"] = self._steering_mode_setting
+
     for param, (title, desc, icon, needs_restart) in self._toggle_defs.items():
       toggle = toggle_item(
         title,
@@ -149,9 +153,6 @@ class TogglesLayout(Widget):
       # insert longitudinal personality after NDOG toggle
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
-
-    # ghostpilot: always show steering mode toggle regardless of car state
-    self._toggles["GhostpilotSteeringMode"] = self._steering_mode_setting
 
     self._update_experimental_mode_icon()
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
