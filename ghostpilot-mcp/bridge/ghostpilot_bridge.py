@@ -334,8 +334,10 @@ async def rpc_openpilot_state(_params):
     state["fingerprint"] = fp.decode("utf-8", errors="replace") if isinstance(fp, bytes) else str(fp or "unknown")
   except Exception:
     state["fingerprint"] = "unknown"
-  state["dongleId"] = (p.get("DongleId") or b"").decode("utf-8", errors="replace")
-  state["gitBranch"] = (p.get("GitBranch") or b"").decode("utf-8", errors="replace")
+  did = p.get("DongleId") or ""
+  state["dongleId"] = did.decode("utf-8", errors="replace") if isinstance(did, bytes) else str(did)
+  gb = p.get("GitBranch") or ""
+  state["gitBranch"] = gb.decode("utf-8", errors="replace") if isinstance(gb, bytes) else str(gb)
 
   # selfdriveState
   try:
