@@ -29,7 +29,7 @@ Ford safety mode is fully open:
 ### Ford Transit Support
 - Platform: `FORD_TRANSIT_MK5` (2025 Ford Transit)
 - CAN bus (Q3 harness), not CAN FD
-- Specs: 2500kg, 3.30m wheelbase, 17.5 steer ratio (estimates, refine on-vehicle)
+- Specs: 2068kg, 3.302m wheelbase, 16.7 steer ratio (regular wheelbase cargo van)
 - Fingerprints: empty — capture from vehicle with `fw_query`
 
 ### Steering Modes
@@ -59,6 +59,8 @@ Uses the SAPP (Semi-Automatic Parallel Parking) protocol to get direct steering 
 5. On fault (state 3), resets and retries automatically
 
 State machine: `IDLE → INIT → WAIT_OPEN → ANGLE_REQ → WAIT_ACTIVE → PARALLEL → COMPLETE`
+
+> **APA Speed Limitation:** This implementation does NOT spoof vehicle speed messages. The PSCM will only accept SAPP angle commands below ~5 MPH. If you need APA steering at higher speeds, speed spoofing of messages 0x202, 0x415, and 0x76 (BrakeSnData_5) would need to be added — this is intentionally omitted.
 
 #### LKA Mode Details
 Sends incremental steering angle corrections through `Lane_Assist_Data1`:
