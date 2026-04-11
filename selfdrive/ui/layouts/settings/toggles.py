@@ -31,6 +31,11 @@ DESCRIPTIONS = {
   'RecordFront': tr_noop("Upload data from the driver facing camera and help improve the driver monitoring algorithm."),
   "IsMetric": tr_noop("Display speed in km/h instead of mph."),
   "RecordAudio": tr_noop("Record and store microphone audio while driving. The audio will be included in the dashcam video in comma connect."),
+  "GhostpilotSteeringMode": tr_noop(
+    "Select the steering control mode. Lane Centering uses stock TJA/LCA curvature control. "
+    "Lane Keep uses LKA incremental angle corrections. "
+    "APA uses SAPP handshake for direct angle control (under 5 MPH only, no speed spoofing)."
+  ),
 }
 
 
@@ -102,6 +107,16 @@ class TogglesLayout(Widget):
       icon="speed_limit.png"
     )
 
+    self._steering_mode_setting = multiple_button_item(
+      lambda: tr("Steering Mode"),
+      lambda: tr(DESCRIPTIONS["GhostpilotSteeringMode"]),
+      buttons=[lambda: tr("Lane Centering"), lambda: tr("Lane Keep"), lambda: tr("APA")],
+      button_width=255,
+      callback=self._set_steering_mode,
+      selected_index=self._params.get("GhostpilotSteeringMode", return_default=True),
+      icon="chffr_wheel.png"
+    )
+
     self._toggles = {}
     self._locked_toggles = set()
     for param, (title, desc, icon, needs_restart) in self._toggle_defs.items():
@@ -134,6 +149,7 @@ class TogglesLayout(Widget):
       # insert longitudinal personality after NDOG toggle
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
+        self._toggles["GhostpilotSteeringMode"] = self._steering_mode_setting
 
     self._update_experimental_mode_icon()
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
@@ -172,11 +188,13 @@ class TogglesLayout(Widget):
         self._toggles["ExperimentalMode"].action_item.set_enabled(True)
         self._toggles["ExperimentalMode"].set_description(e2e_description)
         self._long_personality_setting.action_item.set_enabled(True)
+        self._steering_mode_setting.action_item.set_enabled(True)
       else:
         # no long for now
         self._toggles["ExperimentalMode"].action_item.set_enabled(False)
         self._toggles["ExperimentalMode"].action_item.set_state(False)
         self._long_personality_setting.action_item.set_enabled(False)
+        self._steering_mode_setting.action_item.set_enabled(False)
         self._params.remove("ExperimentalMode")
 
         unavailable = tr("Experimental mode is currently unavailable on this car since the car's stock ACC is used for longitudinal control.")
@@ -204,6 +222,9 @@ class TogglesLayout(Widget):
     for toggle_def in self._toggle_defs:
       if self._toggle_defs[toggle_def][3] and toggle_def not in self._locked_toggles:
         self._toggles[toggle_def].action_item.set_enabled(not ui_state.engaged)
+
+    # ghostpilot: steering mode only changeable when car is off
+    self._steering_mode_setting.action_item.set_enabled(not ui_state.started)
 
   def _render(self, rect):
     self._scroller.render(rect)
@@ -243,3 +264,6 @@ class TogglesLayout(Widget):
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index)
+
+  def _set_steering_mode(self, button_index: int):
+    self._params.put("GhostpilotSteeringMode", button_index)
