@@ -65,7 +65,9 @@ def and_(*fns):
   return lambda *args: operator.and_(*(fn(*args) for fn in fns))
 
 procs = [
-  DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
+  # apa: athena is the WebSocket back to comma servers — disabled to keep the
+  # device fully offline. Local logs still write via loggerd.
+  # DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
@@ -108,8 +110,10 @@ procs = [
   PythonProcess("hardwared", "system.hardware.hardwared", always_run),
   PythonProcess("tombstoned", "system.tombstoned", always_run, enabled=not PC),
   PythonProcess("updated", "system.updated.updated", only_offroad, enabled=not PC),
-  PythonProcess("uploader", "system.loggerd.uploader", always_run),
-  PythonProcess("statsd", "system.statsd", always_run),
+  # apa: uploader ships rlogs/qlogs/videos to my.comma.ai — disabled for full offline.
+  PythonProcess("uploader", "system.loggerd.uploader", always_run, enabled=False),
+  # apa: statsd reports metrics to stats.comma.ai — disabled.
+  PythonProcess("statsd", "system.statsd", always_run, enabled=False),
   PythonProcess("feedbackd", "selfdrive.ui.feedback.feedbackd", only_onroad),
 
   # debug procs
