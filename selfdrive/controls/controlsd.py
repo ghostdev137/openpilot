@@ -48,9 +48,6 @@ class Controls:
 
     # ford-lka sim: hybrid lane-lines curvature planner. Gated per-brand below when used.
     self.lane_lines_planner = LaneLinesPlanner()
-    # Tracks the direct-path angle target for slew limiting. Seeded to current angle
-    # whenever we're not in direct mode so re-entry doesn't jump.
-    self.ford_direct_prev_angle = 0.0
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -123,15 +120,10 @@ class Controls:
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
-    # Transit LKA can only reach +/-5.86 deg on the wire (LaRefAng_No_Req is 12-bit
-    # at 0.05 mrad/bit). Commanding anything bigger just pins apply_ford_angle at its
-    # per-frame saturation limit and accumulates cmd-vs-actual error - that's the
-    # "gain building up" feel. Clip internally to match the wire ceiling.
-    FORD_DIRECT_CLIP_DEG = 5.5
-    # apply_ford_angle ships max 5.8 deg per 33 Hz CAN frame = ~193 deg/s on the wire.
-    # At controlsd's 100 Hz, that maps to 1.93 deg/frame. Match the slew cap so our
-    # target can never outpace what the wheel can actually track.
-    FORD_DIRECT_SLEW_DEG_PER_FRAME = 2.0
+    # Saturate to the DBC ceiling: LaRefAng_No_Req is 12-bit at 0.05 mrad/bit =
+    # +-102.3 mrad = +-5.86 deg. apply_ford_angle's +-5.8 deg delta clip is the only
+    # rate limit on the wire; no internal slew cap.
+    FORD_DIRECT_CLIP_DEG = 5.8
 
     ford_direct = (self.CP.brand == "ford")
 
@@ -158,21 +150,12 @@ class Controls:
       # Direct kinematic: wheel_rad = -curv * L. Sign matches the
       # VM.get_steer_from_curvature(-curv, ...) convention the stock controller uses.
       direct_angle_deg = math.degrees(-new_desired_curvature * self.VM.l) * self.VM.sR
-      # absolute clip
+      # DBC ceiling clip only - no slew limiting. apply_ford_angle on the CAN side
+      # handles per-frame delta of +-5.8 deg (wire rate), which is the real limiter.
       if direct_angle_deg > FORD_DIRECT_CLIP_DEG:
         direct_angle_deg = FORD_DIRECT_CLIP_DEG
       elif direct_angle_deg < -FORD_DIRECT_CLIP_DEG:
         direct_angle_deg = -FORD_DIRECT_CLIP_DEG
-      # seed the slew tracker to current wheel while disengaged so re-engage doesn't jump
-      if not CC.latActive:
-        self.ford_direct_prev_angle = float(CS.steeringAngleDeg)
-      # per-frame slew cap
-      delta = direct_angle_deg - self.ford_direct_prev_angle
-      if delta > FORD_DIRECT_SLEW_DEG_PER_FRAME:
-        direct_angle_deg = self.ford_direct_prev_angle + FORD_DIRECT_SLEW_DEG_PER_FRAME
-      elif delta < -FORD_DIRECT_SLEW_DEG_PER_FRAME:
-        direct_angle_deg = self.ford_direct_prev_angle - FORD_DIRECT_SLEW_DEG_PER_FRAME
-      self.ford_direct_prev_angle = direct_angle_deg
 
       self.desired_curvature = new_desired_curvature
       actuators.curvature = self.desired_curvature
