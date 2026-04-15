@@ -13,17 +13,29 @@ Rlog survey on Transit segments: ~38% of frames have both lanes >0.3 prob,
 """
 from __future__ import annotations
 
+from collections import deque
+
 import numpy as np
 
 
-DEFAULT_LANE_WIDTH = 3.7          # m, US interstate standard; FIXED for single-side
-                                  # fallback - EMA drift caused offset hallucination on-road
+DEFAULT_LANE_WIDTH = 3.7          # m, US interstate standard; seed value
 MIN_PROB_BOTH = 0.5               # threshold when both lanes are in play
 MIN_PROB_SINGLE = 0.85            # very strict for single-side anchor
 SINGLE_SIDE_CONF_DERATE = 0.2     # single-side conf caps around 0.2 -> blend caps
                                   # at ~0.4 (with conf/0.5 remap). Model dominates.
 SINGLE_SIDE_OFFSET_SANITY_M = 0.6 # single-side commanded offset > 0.6 m rejects
                                   # (real lanes keep you within ~0.3 m of center)
+
+# Rolling lane-width history. Updated only when both lanes are confidently detected.
+# Gives a data-driven width for single-side fallback instead of assuming 3.7 m.
+# modelV2 fires at 20 Hz, so 45 s = 900 samples.
+WIDTH_HISTORY_SECONDS = 45.0
+WIDTH_HISTORY_RATE_HZ = 20        # modelV2 publish rate
+WIDTH_HISTORY_MAXLEN = int(WIDTH_HISTORY_SECONDS * WIDTH_HISTORY_RATE_HZ)
+WIDTH_HISTORY_ACCEPT_PROB = 0.6   # both lanes must exceed this to trust the sample
+WIDTH_HISTORY_SAMPLE_MIN_M = 2.7  # reject obvious bad detections (narrower than US lane)
+WIDTH_HISTORY_SAMPLE_MAX_M = 4.5  # reject obvious bad detections (wider than US lane)
+WIDTH_HISTORY_MIN_SAMPLES = 40    # need at least ~2 s of data before trusting history
 CONF_EMA_ALPHA = 0.3
 CONF_DECAY_PER_FRAME = 0.95       # when lanes absent entirely
 # Output EMA disabled: on-road test showed the van wasn't pulling back to center
@@ -56,6 +68,12 @@ class LaneLinesPlanner:
   def __init__(self):
     self.confidence = 0.0
     self.last_curvature = 0.0
+    self.width_history: deque[float] = deque(maxlen=WIDTH_HISTORY_MAXLEN)
+
+  def _estimated_lane_width(self) -> float:
+    if len(self.width_history) >= WIDTH_HISTORY_MIN_SAMPLES:
+      return float(np.mean(self.width_history))
+    return DEFAULT_LANE_WIDTH
 
   def update(self, model_v2, v_ego: float = 0.0, lane_change_active: bool = False) -> tuple[float, float]:
     # During a lane change, hand control back to the model. We hold last_curvature
@@ -77,21 +95,28 @@ class LaneLinesPlanner:
     y_left = np.asarray(left.y, dtype=np.float32)
     y_right = np.asarray(right.y, dtype=np.float32)
 
+    # Update width history when both lanes are solidly detected.
+    if left_p > WIDTH_HISTORY_ACCEPT_PROB and right_p > WIDTH_HISTORY_ACCEPT_PROB:
+      w0 = float(y_right[0] - y_left[0])
+      if WIDTH_HISTORY_SAMPLE_MIN_M < w0 < WIDTH_HISTORY_SAMPLE_MAX_M:
+        self.width_history.append(w0)
+
+    lane_width = self._estimated_lane_width()
+
     # Both lanes: direct midpoint, full confidence.
-    # Single-side: anchor on the confident lane using FIXED default width and a
-    # sanity reject if the implied y-offset is absurd. Confidence is heavily derated
-    # so the blend stays model-dominant - this is a nudge, not a commitment.
+    # Single-side: anchor using the history-averaged width (falls back to default
+    # before enough samples accumulate). Offset sanity reject still in effect.
     if left_p > MIN_PROB_BOTH and right_p > MIN_PROB_BOTH:
       y_mid = 0.5 * (y_left + y_right)
       raw_conf = min(left_p, right_p)
     elif left_p > MIN_PROB_SINGLE:
-      y_mid = y_left + 0.5 * DEFAULT_LANE_WIDTH
+      y_mid = y_left + 0.5 * lane_width
       if abs(float(y_mid[0])) > SINGLE_SIDE_OFFSET_SANITY_M:
         self.confidence *= CONF_DECAY_PER_FRAME
         return self.last_curvature, self.confidence
       raw_conf = left_p * SINGLE_SIDE_CONF_DERATE
     elif right_p > MIN_PROB_SINGLE:
-      y_mid = y_right - 0.5 * DEFAULT_LANE_WIDTH
+      y_mid = y_right - 0.5 * lane_width
       if abs(float(y_mid[0])) > SINGLE_SIDE_OFFSET_SANITY_M:
         self.confidence *= CONF_DECAY_PER_FRAME
         return self.last_curvature, self.confidence

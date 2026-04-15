@@ -123,8 +123,15 @@ class Controls:
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
-    FORD_DIRECT_CLIP_DEG = 30.0         # final safety clip on direct wheel angle
-    FORD_DIRECT_SLEW_DEG_PER_FRAME = 8.0
+    # Transit LKA can only reach +/-5.86 deg on the wire (LaRefAng_No_Req is 12-bit
+    # at 0.05 mrad/bit). Commanding anything bigger just pins apply_ford_angle at its
+    # per-frame saturation limit and accumulates cmd-vs-actual error - that's the
+    # "gain building up" feel. Clip internally to match the wire ceiling.
+    FORD_DIRECT_CLIP_DEG = 5.5
+    # apply_ford_angle ships max 5.8 deg per 33 Hz CAN frame = ~193 deg/s on the wire.
+    # At controlsd's 100 Hz, that maps to 1.93 deg/frame. Match the slew cap so our
+    # target can never outpace what the wheel can actually track.
+    FORD_DIRECT_SLEW_DEG_PER_FRAME = 2.0
 
     ford_direct = (self.CP.brand == "ford")
 
