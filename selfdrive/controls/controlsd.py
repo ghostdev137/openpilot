@@ -133,16 +133,12 @@ class Controls:
     else:
       model_curvature = model_v2.action.desiredCurvature
       if ford_direct:
+        # Model-only: lane_lines_planner temporarily bypassed. We still run .update()
+        # so width_history keeps accumulating for whenever we switch back, but the
+        # blend is disabled - pure model curvature flows to the direct-path kinematic.
         lane_change_active = bool(CS.leftBlinker or CS.rightBlinker)
-        lane_curv, lane_conf = self.lane_lines_planner.update(model_v2, CS.vEgo, lane_change_active)
-        # Blend lane (when confident) with model (always). Everything downstream - the
-        # ISO jerk clip, VehicleModel roll comp, angleOffsetDeg, LatControlAngle's
-        # internal feedback - all get SKIPPED for Ford. Command goes straight to the
-        # carcontroller via actuators.steeringAngleDeg.
-        blend = max(0.0, min(1.0, lane_conf / 0.5))
-        new_desired_curvature = blend * lane_curv + (1.0 - blend) * model_curvature
-        if not CC.latActive:
-          new_desired_curvature = self.curvature
+        self.lane_lines_planner.update(model_v2, CS.vEgo, lane_change_active)
+        new_desired_curvature = model_curvature if CC.latActive else self.curvature
       else:
         new_desired_curvature = model_curvature if CC.latActive else self.curvature
 
