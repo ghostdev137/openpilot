@@ -12,6 +12,10 @@ class LatControlAngle(LatControl):
     super().__init__(CP, CI, dt)
     self.sat_check_min_speed = 5.
     self.use_steer_limited_by_safety = CP.brand in ("tesla", "hyundai")
+    # ford-lka sim: close the loop with a proportional term on angle error so crosswind
+    # disturbances don't have to propagate through the vision pipeline before being rejected.
+    self.ford_closed_loop = CP.brand == "ford"
+    self.ford_kp = 0.5  # degrees of extra command per degree of tracking error
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
     angle_log = log.ControlsState.LateralAngleState.new_message()
@@ -23,6 +27,8 @@ class LatControlAngle(LatControl):
       angle_log.active = True
       angle_steers_des = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll))
       angle_steers_des += params.angleOffsetDeg
+      if self.ford_closed_loop:
+        angle_steers_des += self.ford_kp * (angle_steers_des - CS.steeringAngleDeg)
 
     if self.use_steer_limited_by_safety:
       # these cars' carcontrollers calculate max lateral accel and jerk, so we can rely on carOutput for saturation
