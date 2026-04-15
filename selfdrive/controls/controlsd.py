@@ -130,7 +130,10 @@ class Controls:
       if self.CP.brand == "ford":
         lane_change_active = bool(CS.leftBlinker or CS.rightBlinker)
         lane_curv, lane_conf = self.lane_lines_planner.update(model_v2, CS.vEgo, lane_change_active)
-        blend = max(0.0, min(1.0, lane_conf))
+        # Saturating remap: conf>=0.5 means full lane authority (no model dilution).
+        # Model commands tiny curvatures at cruise, so a linear blend at conf=0.7 was
+        # throwing away 30% of our lane command - that's what left the van drifting.
+        blend = max(0.0, min(1.0, lane_conf / 0.5))
         blended = blend * lane_curv + (1.0 - blend) * model_curvature
         new_desired_curvature = blended if CC.latActive else self.curvature
       else:

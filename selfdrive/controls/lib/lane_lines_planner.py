@@ -24,17 +24,23 @@ WIDTH_SANITY_MAX = 5.0
 WIDTH_EMA_ALPHA = 0.2
 CONF_EMA_ALPHA = 0.3
 CONF_DECAY_PER_FRAME = 0.95       # when lanes absent entirely
-OUTPUT_EMA_ALPHA = 0.35           # light LP on final curvature; fights polyfit noise
-                                  # at steady highway cruise without adding perceptible lag
+# Output EMA disabled: on-road test showed the van wasn't pulling back to center
+# (std=0.15 m offset, 55% of engaged frames > 0.1 m off). We need authority, not
+# smoothness. Keeping alpha=1.0 means no filtering on the output.
+OUTPUT_EMA_ALPHA = 1.0
 
 # Fit window is fixed: experimentally, speed-scaling the fit window hurts highway
 # steady-cruise variance because distant lane points feed polyfit noise into c2.
 # 30 m is the sweet spot for Transit on rlog.
 FIT_HORIZON_M = 30.0
-# Pursuit *is* speed-scaled - classic pure-pursuit "look 1-1.5 s ahead" rule.
-PURSUIT_SECONDS = 1.2
-PURSUIT_MIN_M = 12.0              # 12 m floor: below this, 2/x0^2 amplifies noise too much
-PURSUIT_MAX_M = 30.0
+# Pursuit is speed-scaled. Classic rule is 1-1.5 s of travel, but that produced an
+# under-damped "drift around the center" behavior on the real Transit (55% of
+# engaged frames were > 0.1 m off). Shorter pursuit -> curvature = 2y/x0^2 scales
+# up quadratically, so 0.6 s gives ~4x more authority than 1.2 s for the same offset.
+# Noise goes up, user explicitly accepts it.
+PURSUIT_SECONDS = 0.6
+PURSUIT_MIN_M = 8.0
+PURSUIT_MAX_M = 18.0
 
 # Sanity cap on output. Vehicle can't physically curve tighter than this at normal
 # speeds anyway, and producing larger values from noisy lane detections is pure harm.
