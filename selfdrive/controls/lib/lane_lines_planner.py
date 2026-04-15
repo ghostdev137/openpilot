@@ -17,8 +17,9 @@ import numpy as np
 
 
 DEFAULT_LANE_WIDTH = 3.7          # m, US interstate standard
-MIN_PROB = 0.3                    # below this, treat lane as absent
-BOTH_PROB_FOR_WIDTH_UPDATE = 0.5  # only update width EMA when both are strong
+MIN_PROB = 0.5                    # both lanes must clear this; single-side fallback
+                                  # with EMA-guessed width hallucinated offsets on-road
+BOTH_PROB_FOR_WIDTH_UPDATE = 0.6
 WIDTH_SANITY_MIN = 2.5
 WIDTH_SANITY_MAX = 5.0
 WIDTH_EMA_ALPHA = 0.2
@@ -33,14 +34,13 @@ OUTPUT_EMA_ALPHA = 1.0
 # steady-cruise variance because distant lane points feed polyfit noise into c2.
 # 30 m is the sweet spot for Transit on rlog.
 FIT_HORIZON_M = 30.0
-# Pursuit is speed-scaled. Classic rule is 1-1.5 s of travel, but that produced an
-# under-damped "drift around the center" behavior on the real Transit (55% of
-# engaged frames were > 0.1 m off). Shorter pursuit -> curvature = 2y/x0^2 scales
-# up quadratically, so 0.6 s gives ~4x more authority than 1.2 s for the same offset.
-# Noise goes up, user explicitly accepts it.
-PURSUIT_SECONDS = 0.6
-PURSUIT_MIN_M = 8.0
-PURSUIT_MAX_M = 18.0
+# Pursuit: compromise between 1.2 s (weak centering) and 0.6 s (over-aggressive,
+# caused on-road swerves when combined with runaway yaw-rate feedback). 0.8 s with
+# 10-22 m bounds gives reasonable authority without the quadratic noise amplification
+# of very short pursuit.
+PURSUIT_SECONDS = 0.8
+PURSUIT_MIN_M = 10.0
+PURSUIT_MAX_M = 22.0
 
 # Sanity cap on output. Vehicle can't physically curve tighter than this at normal
 # speeds anyway, and producing larger values from noisy lane detections is pure harm.
@@ -82,15 +82,12 @@ class LaneLinesPlanner:
       if WIDTH_SANITY_MIN < w0 < WIDTH_SANITY_MAX:
         self.lane_width = WIDTH_EMA_ALPHA * w0 + (1.0 - WIDTH_EMA_ALPHA) * self.lane_width
 
+    # Single-side fallback removed: on-road rlog showed it commanding hard-left swerves
+    # when right lane prob was borderline (0.21-0.28) and EMA width was stale. Require
+    # both lanes confidently detected; otherwise decay confidence so model takes over.
     if left_p > MIN_PROB and right_p > MIN_PROB:
       y_mid = 0.5 * (y_left + y_right)
       raw_conf = min(left_p, right_p)
-    elif left_p > MIN_PROB:
-      y_mid = y_left + 0.5 * self.lane_width
-      raw_conf = left_p * 0.7
-    elif right_p > MIN_PROB:
-      y_mid = y_right - 0.5 * self.lane_width
-      raw_conf = right_p * 0.7
     else:
       self.confidence *= CONF_DECAY_PER_FRAME
       return self.last_curvature, self.confidence
