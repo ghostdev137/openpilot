@@ -16,13 +16,14 @@ from __future__ import annotations
 import numpy as np
 
 
-DEFAULT_LANE_WIDTH = 3.7          # m, US interstate standard
-MIN_PROB = 0.5                    # both lanes must clear this; single-side fallback
-                                  # with EMA-guessed width hallucinated offsets on-road
-BOTH_PROB_FOR_WIDTH_UPDATE = 0.6
-WIDTH_SANITY_MIN = 2.5
-WIDTH_SANITY_MAX = 5.0
-WIDTH_EMA_ALPHA = 0.2
+DEFAULT_LANE_WIDTH = 3.7          # m, US interstate standard; FIXED for single-side
+                                  # fallback - EMA drift caused offset hallucination on-road
+MIN_PROB_BOTH = 0.5               # threshold when both lanes are in play
+MIN_PROB_SINGLE = 0.85            # very strict for single-side anchor
+SINGLE_SIDE_CONF_DERATE = 0.2     # single-side conf caps around 0.2 -> blend caps
+                                  # at ~0.4 (with conf/0.5 remap). Model dominates.
+SINGLE_SIDE_OFFSET_SANITY_M = 0.6 # single-side commanded offset > 0.6 m rejects
+                                  # (real lanes keep you within ~0.3 m of center)
 CONF_EMA_ALPHA = 0.3
 CONF_DECAY_PER_FRAME = 0.95       # when lanes absent entirely
 # Output EMA disabled: on-road test showed the van wasn't pulling back to center
@@ -53,7 +54,6 @@ LANE_CHANGE_SPEED_MIN = 6.7       # m/s (~15 mph)
 
 class LaneLinesPlanner:
   def __init__(self):
-    self.lane_width = DEFAULT_LANE_WIDTH
     self.confidence = 0.0
     self.last_curvature = 0.0
 
@@ -77,17 +77,25 @@ class LaneLinesPlanner:
     y_left = np.asarray(left.y, dtype=np.float32)
     y_right = np.asarray(right.y, dtype=np.float32)
 
-    if left_p > BOTH_PROB_FOR_WIDTH_UPDATE and right_p > BOTH_PROB_FOR_WIDTH_UPDATE:
-      w0 = float(y_right[0] - y_left[0])
-      if WIDTH_SANITY_MIN < w0 < WIDTH_SANITY_MAX:
-        self.lane_width = WIDTH_EMA_ALPHA * w0 + (1.0 - WIDTH_EMA_ALPHA) * self.lane_width
-
-    # Single-side fallback removed: on-road rlog showed it commanding hard-left swerves
-    # when right lane prob was borderline (0.21-0.28) and EMA width was stale. Require
-    # both lanes confidently detected; otherwise decay confidence so model takes over.
-    if left_p > MIN_PROB and right_p > MIN_PROB:
+    # Both lanes: direct midpoint, full confidence.
+    # Single-side: anchor on the confident lane using FIXED default width and a
+    # sanity reject if the implied y-offset is absurd. Confidence is heavily derated
+    # so the blend stays model-dominant - this is a nudge, not a commitment.
+    if left_p > MIN_PROB_BOTH and right_p > MIN_PROB_BOTH:
       y_mid = 0.5 * (y_left + y_right)
       raw_conf = min(left_p, right_p)
+    elif left_p > MIN_PROB_SINGLE:
+      y_mid = y_left + 0.5 * DEFAULT_LANE_WIDTH
+      if abs(float(y_mid[0])) > SINGLE_SIDE_OFFSET_SANITY_M:
+        self.confidence *= CONF_DECAY_PER_FRAME
+        return self.last_curvature, self.confidence
+      raw_conf = left_p * SINGLE_SIDE_CONF_DERATE
+    elif right_p > MIN_PROB_SINGLE:
+      y_mid = y_right - 0.5 * DEFAULT_LANE_WIDTH
+      if abs(float(y_mid[0])) > SINGLE_SIDE_OFFSET_SANITY_M:
+        self.confidence *= CONF_DECAY_PER_FRAME
+        return self.last_curvature, self.confidence
+      raw_conf = right_p * SINGLE_SIDE_CONF_DERATE
     else:
       self.confidence *= CONF_DECAY_PER_FRAME
       return self.last_curvature, self.confidence

@@ -23,6 +23,13 @@ class LatControlAngle(LatControl):
     # Hard sanity clip on final commanded wheel angle. Vehicle never needs more than
     # this for any realistic lane-keeping scenario on a straight road.
     self.ford_angle_clip_deg = 30.0
+    # Per-frame slew cap on controller output. With stripped PSCM rate limits, a
+    # jump from 0 to 30 deg in one frame is a real 33 Hz sustained command - would
+    # feed 5.8 deg/frame deltas into apply_ford_angle and slew the column at ~191 deg/s.
+    # Cap target slew so the controller itself can't ramp target faster than the car
+    # can usefully respond. 8 deg per 33 Hz frame = 264 deg/s - still fast, but finite.
+    self.ford_slew_deg_per_frame = 8.0
+    self.ford_prev_out = 0.0
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
     angle_log = log.ControlsState.LateralAngleState.new_message()
@@ -30,6 +37,8 @@ class LatControlAngle(LatControl):
     if not active:
       angle_log.active = False
       angle_steers_des = float(CS.steeringAngleDeg)
+      # keep slew cap tracking seeded to current wheel so re-engagement doesn't jump
+      self.ford_prev_out = angle_steers_des
     else:
       angle_log.active = True
       angle_steers_des = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll))
@@ -47,6 +56,13 @@ class LatControlAngle(LatControl):
         clip = self.ford_angle_clip_deg
         if angle_steers_des > clip: angle_steers_des = clip
         elif angle_steers_des < -clip: angle_steers_des = -clip
+        # per-frame slew cap: bound how fast the TARGET moves, independent of what
+        # apply_ford_angle does on the wire. Prevents sustained max-delta commanding.
+        slew = self.ford_slew_deg_per_frame
+        delta = angle_steers_des - self.ford_prev_out
+        if delta > slew: angle_steers_des = self.ford_prev_out + slew
+        elif delta < -slew: angle_steers_des = self.ford_prev_out - slew
+        self.ford_prev_out = angle_steers_des
 
     if self.use_steer_limited_by_safety:
       # these cars' carcontrollers calculate max lateral accel and jerk, so we can rely on carOutput for saturation
