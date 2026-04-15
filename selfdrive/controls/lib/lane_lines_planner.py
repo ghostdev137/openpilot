@@ -9,7 +9,7 @@ scalar so controlsd can blend against the model's e2e output (or drop to it enti
 when lane lines are unreliable).
 
 Rlog survey on Transit segments: ~38% of frames have both lanes >0.3 prob,
-~69% have at least one. ~31% genuinely need fallback — hybrid is mandatory.
+~69% have at least one. ~31% genuinely need fallback - hybrid is mandatory.
 """
 from __future__ import annotations
 
@@ -19,13 +19,30 @@ import numpy as np
 DEFAULT_LANE_WIDTH = 3.7          # m, US interstate standard
 MIN_PROB = 0.3                    # below this, treat lane as absent
 BOTH_PROB_FOR_WIDTH_UPDATE = 0.5  # only update width EMA when both are strong
-LOOKAHEAD_FIT_M = 30.0            # fit polynomial to x within this range
-PURSUIT_DISTANCE_M = 15.0         # aim point for pure-pursuit curvature
 WIDTH_SANITY_MIN = 2.5
 WIDTH_SANITY_MAX = 5.0
 WIDTH_EMA_ALPHA = 0.2
 CONF_EMA_ALPHA = 0.3
 CONF_DECAY_PER_FRAME = 0.95       # when lanes absent entirely
+OUTPUT_EMA_ALPHA = 0.35           # light LP on final curvature; fights polyfit noise
+                                  # at steady highway cruise without adding perceptible lag
+
+# Fit window is fixed: experimentally, speed-scaling the fit window hurts highway
+# steady-cruise variance because distant lane points feed polyfit noise into c2.
+# 30 m is the sweet spot for Transit on rlog.
+FIT_HORIZON_M = 30.0
+# Pursuit *is* speed-scaled - classic pure-pursuit "look 1-1.5 s ahead" rule.
+PURSUIT_SECONDS = 1.2
+PURSUIT_MIN_M = 12.0              # 12 m floor: below this, 2/x0^2 amplifies noise too much
+PURSUIT_MAX_M = 30.0
+
+# Sanity cap on output. Vehicle can't physically curve tighter than this at normal
+# speeds anyway, and producing larger values from noisy lane detections is pure harm.
+CURVATURE_OUTPUT_CLIP = 0.015
+
+# Above this speed, blinker + steering wheel motion means the model is running a
+# lane change - the planner must step out of the way or it will fight the maneuver.
+LANE_CHANGE_SPEED_MIN = 6.7       # m/s (~15 mph)
 
 
 class LaneLinesPlanner:
@@ -34,7 +51,13 @@ class LaneLinesPlanner:
     self.confidence = 0.0
     self.last_curvature = 0.0
 
-  def update(self, model_v2) -> tuple[float, float]:
+  def update(self, model_v2, v_ego: float = 0.0, lane_change_active: bool = False) -> tuple[float, float]:
+    # During a lane change, hand control back to the model. We hold last_curvature
+    # but decay confidence fast so the blend goes to model inside ~20 frames.
+    if lane_change_active and v_ego > LANE_CHANGE_SPEED_MIN:
+      self.confidence *= CONF_DECAY_PER_FRAME
+      return self.last_curvature, self.confidence
+
     if not model_v2.laneLines or len(model_v2.laneLineProbs) < 3:
       self.confidence *= CONF_DECAY_PER_FRAME
       return self.last_curvature, self.confidence
@@ -66,7 +89,7 @@ class LaneLinesPlanner:
       self.confidence *= CONF_DECAY_PER_FRAME
       return self.last_curvature, self.confidence
 
-    mask = xs <= LOOKAHEAD_FIT_M
+    mask = xs <= FIT_HORIZON_M
     if int(mask.sum()) < 5:
       self.confidence *= CONF_DECAY_PER_FRAME
       return self.last_curvature, self.confidence
@@ -75,14 +98,13 @@ class LaneLinesPlanner:
     c2, c1, c0 = float(coeffs[0]), float(coeffs[1]), float(coeffs[2])
 
     # Pure-pursuit target: curvature to reach (x0, y_mid(x0)) from vehicle origin,
-    # heading 0. Small-angle: κ ≈ 2·y_target / x0². Includes lane curvature (c2),
-    # heading error (c1), and lateral offset (c0) automatically by construction.
-    x0 = PURSUIT_DISTANCE_M
+    # heading 0. Small-angle: k ~ 2 * y_target / x0^2. Includes lane curvature (c2),
+    # heading error (c1), and lateral offset (c0) by construction.
+    x0 = max(PURSUIT_MIN_M, min(PURSUIT_MAX_M, v_ego * PURSUIT_SECONDS))
     y_at_x0 = c0 + c1 * x0 + c2 * x0 * x0
-    curvature = 2.0 * y_at_x0 / (x0 * x0)
-    # openpilot curvature sign convention: positive = right turn in vehicle frame.
-    # y is positive to the right in device frame → if path bends right (y>0 ahead),
-    # we want positive curvature, which this gives.
+    curvature_raw = 2.0 * y_at_x0 / (x0 * x0)
+    curvature_raw = max(-CURVATURE_OUTPUT_CLIP, min(CURVATURE_OUTPUT_CLIP, curvature_raw))
+    curvature = OUTPUT_EMA_ALPHA * curvature_raw + (1.0 - OUTPUT_EMA_ALPHA) * self.last_curvature
 
     self.confidence = CONF_EMA_ALPHA * raw_conf + (1.0 - CONF_EMA_ALPHA) * self.confidence
     self.last_curvature = curvature

@@ -128,7 +128,8 @@ class Controls:
       # the model's end-to-end curvature (lazy + noisy but always present). Confidence
       # drives the mix — fully lanes when both lines are strong, fully model when blind.
       if self.CP.brand == "ford":
-        lane_curv, lane_conf = self.lane_lines_planner.update(model_v2)
+        lane_change_active = bool(CS.leftBlinker or CS.rightBlinker)
+        lane_curv, lane_conf = self.lane_lines_planner.update(model_v2, CS.vEgo, lane_change_active)
         blend = max(0.0, min(1.0, lane_conf))
         blended = blend * lane_curv + (1.0 - blend) * model_curvature
         new_desired_curvature = blended if CC.latActive else self.curvature
