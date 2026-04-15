@@ -48,6 +48,9 @@ class Controls:
 
     # ford-lka sim: hybrid lane-lines curvature planner. Gated per-brand below when used.
     self.lane_lines_planner = LaneLinesPlanner()
+    # Tracks the direct-path angle target for slew limiting. Seeded to current angle
+    # whenever we're not in direct mode so re-entry doesn't jump.
+    self.ford_direct_prev_angle = 0.0
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -120,33 +123,67 @@ class Controls:
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
+    FORD_DIRECT_CLIP_DEG = 30.0         # final safety clip on direct wheel angle
+    FORD_DIRECT_SLEW_DEG_PER_FRAME = 8.0
+
+    ford_direct = (self.CP.brand == "ford")
+
     if self.sm.valid['lateralManeuverPlan']:
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
+      ford_direct = False  # unknown planner, fall back to normal pipeline
     else:
       model_curvature = model_v2.action.desiredCurvature
-      # ford-lka sim: blend lane-lines curvature (low-noise, pure vision geometry) with
-      # the model's end-to-end curvature (lazy + noisy but always present). Confidence
-      # drives the mix — fully lanes when both lines are strong, fully model when blind.
-      if self.CP.brand == "ford":
+      if ford_direct:
         lane_change_active = bool(CS.leftBlinker or CS.rightBlinker)
         lane_curv, lane_conf = self.lane_lines_planner.update(model_v2, CS.vEgo, lane_change_active)
-        # Saturating remap: conf>=0.5 means full lane authority (no model dilution).
-        # Model commands tiny curvatures at cruise, so a linear blend at conf=0.7 was
-        # throwing away 30% of our lane command - that's what left the van drifting.
+        # Blend lane (when confident) with model (always). Everything downstream - the
+        # ISO jerk clip, VehicleModel roll comp, angleOffsetDeg, LatControlAngle's
+        # internal feedback - all get SKIPPED for Ford. Command goes straight to the
+        # carcontroller via actuators.steeringAngleDeg.
         blend = max(0.0, min(1.0, lane_conf / 0.5))
-        blended = blend * lane_curv + (1.0 - blend) * model_curvature
-        new_desired_curvature = blended if CC.latActive else self.curvature
+        new_desired_curvature = blend * lane_curv + (1.0 - blend) * model_curvature
+        if not CC.latActive:
+          new_desired_curvature = self.curvature
       else:
         new_desired_curvature = model_curvature if CC.latActive else self.curvature
-    self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
-    actuators.curvature = self.desired_curvature
-    steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
-                                                       self.steer_limited_by_safety, self.desired_curvature,
-                                                       curvature_limited, lat_delay)
-    actuators.torque = float(steer)
-    actuators.steeringAngleDeg = float(steeringAngleDeg)
+    if ford_direct:
+      # Direct kinematic: wheel_rad = -curv * L. Sign matches the
+      # VM.get_steer_from_curvature(-curv, ...) convention the stock controller uses.
+      direct_angle_deg = math.degrees(-new_desired_curvature * self.VM.l) * self.VM.sR
+      # absolute clip
+      if direct_angle_deg > FORD_DIRECT_CLIP_DEG:
+        direct_angle_deg = FORD_DIRECT_CLIP_DEG
+      elif direct_angle_deg < -FORD_DIRECT_CLIP_DEG:
+        direct_angle_deg = -FORD_DIRECT_CLIP_DEG
+      # seed the slew tracker to current wheel while disengaged so re-engage doesn't jump
+      if not CC.latActive:
+        self.ford_direct_prev_angle = float(CS.steeringAngleDeg)
+      # per-frame slew cap
+      delta = direct_angle_deg - self.ford_direct_prev_angle
+      if delta > FORD_DIRECT_SLEW_DEG_PER_FRAME:
+        direct_angle_deg = self.ford_direct_prev_angle + FORD_DIRECT_SLEW_DEG_PER_FRAME
+      elif delta < -FORD_DIRECT_SLEW_DEG_PER_FRAME:
+        direct_angle_deg = self.ford_direct_prev_angle - FORD_DIRECT_SLEW_DEG_PER_FRAME
+      self.ford_direct_prev_angle = direct_angle_deg
+
+      self.desired_curvature = new_desired_curvature
+      actuators.curvature = self.desired_curvature
+      actuators.steeringAngleDeg = float(direct_angle_deg)
+      actuators.torque = 0.0
+      lac_log = log.ControlsState.LateralAngleState.new_message()
+      lac_log.active = CC.latActive
+      lac_log.steeringAngleDeg = float(CS.steeringAngleDeg)
+      lac_log.steeringAngleDesiredDeg = float(direct_angle_deg)
+    else:
+      self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
+      lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+      actuators.curvature = self.desired_curvature
+      steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
+                                                         self.steer_limited_by_safety, self.desired_curvature,
+                                                         curvature_limited, lat_delay)
+      actuators.torque = float(steer)
+      actuators.steeringAngleDeg = float(steeringAngleDeg)
     # Ensure no NaNs/Infs
     for p in ACTUATOR_FIELDS:
       attr = getattr(actuators, p)
