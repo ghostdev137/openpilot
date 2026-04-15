@@ -12,10 +12,12 @@ class LatControlAngle(LatControl):
     super().__init__(CP, CI, dt)
     self.sat_check_min_speed = 5.
     self.use_steer_limited_by_safety = CP.brand in ("tesla", "hyundai")
-    # ford-lka sim: close the loop with a proportional term on angle error so crosswind
-    # disturbances don't have to propagate through the vision pipeline before being rejected.
+    # ford-lka sim: close the loop around the open-loop kinematic controller. Adds two
+    # feedback terms so disturbances (crosswind) don't have to propagate through the vision
+    # pipeline before being rejected.
     self.ford_closed_loop = CP.brand == "ford"
-    self.ford_kp = 0.5  # degrees of extra command per degree of tracking error
+    self.ford_kp_angle = 0.5     # amplification on angle tracking error
+    self.ford_kp_yawrate = 1.0   # gain on equivalent-angle derived from yaw-rate error
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
     angle_log = log.ControlsState.LateralAngleState.new_message()
@@ -28,7 +30,16 @@ class LatControlAngle(LatControl):
       angle_steers_des = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll))
       angle_steers_des += params.angleOffsetDeg
       if self.ford_closed_loop:
-        angle_steers_des += self.ford_kp * (angle_steers_des - CS.steeringAngleDeg)
+        # snapshot target before mutating, so both errors are against the planner's demand
+        target = angle_steers_des
+        angle_err_deg = target - CS.steeringAngleDeg
+        # desired yaw rate from curvature identity; convert (desired - actual) yaw-rate
+        # error into the steering-wheel angle that would produce it at current speed
+        desired_yaw_rate = -desired_curvature * CS.vEgo
+        yaw_rate_err = desired_yaw_rate - CS.yawRate
+        yaw_err_angle_deg = math.degrees(yaw_rate_err * VM.l / max(CS.vEgo, 1.0)) * VM.sR
+        angle_steers_des += self.ford_kp_angle * angle_err_deg
+        angle_steers_des += self.ford_kp_yawrate * yaw_err_angle_deg
 
     if self.use_steer_limited_by_safety:
       # these cars' carcontrollers calculate max lateral accel and jerk, so we can rely on carOutput for saturation
