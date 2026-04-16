@@ -120,11 +120,6 @@ class Controls:
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
-    # Saturate to the DBC ceiling: LaRefAng_No_Req is 12-bit at 0.05 mrad/bit =
-    # +-102.3 mrad = +-5.86 deg. apply_ford_angle's +-5.8 deg delta clip is the only
-    # rate limit on the wire; no internal slew cap.
-    FORD_DIRECT_CLIP_DEG = 5.8
-
     ford_direct = (self.CP.brand == "ford")
 
     if self.sm.valid['lateralManeuverPlan']:
@@ -146,12 +141,6 @@ class Controls:
       # Direct kinematic: wheel_rad = -curv * L. Sign matches the
       # VM.get_steer_from_curvature(-curv, ...) convention the stock controller uses.
       direct_angle_deg = math.degrees(-new_desired_curvature * self.VM.l) * self.VM.sR
-      # DBC ceiling clip only - no slew limiting. apply_ford_angle on the CAN side
-      # handles per-frame delta of +-5.8 deg (wire rate), which is the real limiter.
-      if direct_angle_deg > FORD_DIRECT_CLIP_DEG:
-        direct_angle_deg = FORD_DIRECT_CLIP_DEG
-      elif direct_angle_deg < -FORD_DIRECT_CLIP_DEG:
-        direct_angle_deg = -FORD_DIRECT_CLIP_DEG
 
       self.desired_curvature = new_desired_curvature
       actuators.curvature = self.desired_curvature
